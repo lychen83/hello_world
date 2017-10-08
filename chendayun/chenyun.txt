@@ -1,0 +1,384 @@
+"""
+Each line of the taxon table looks like:
+taxonID	Family_Genera_speices
+"""
+
+# filteres for cary clade-wise searches
+# in total, we have 30 blue species, 25 red species, 5 unknown species and 10 outgroup species
+num_blue_families_max = 2 # in total,  9 blue families, 13 samples (exclude "Kewaceae","Limeaceae", "Molluginaceae", "Caryophyllaceae")
+num_red_families_min = 14   #in total, 16 red families were used
+num_red_species_min = 20 #in total, 25 red samples were used
+num_core_blue_families_max = 2 # in total, 4 families, 17 samples
+num_core_blue_species_max =4
+import sys,os,ntpath
+import newick3,phylo3
+import taxon_name_subst
+
+# 9 in total. All the blue color non-core-caryophyllales families
+#blue = ["Ancistrocladaceae", "Droseraceae","Drosophyllaceae", "Frankeniaceae", "Macarthuriaceae", "Nepenthaceae", "Plumbagianceae", "Polygonaceae", "Tamaricaceae", "Caryophyllaceae"]
+
+# 17 intotal, include all the 16 red color families with rnaseq data
+#  Petiveriaceae is formally Rivinaceae
+#red = ["Nyctaginaceae","Talinaceae",\
+#       "Didieraceae","Gisekiaceae","Stegnospermataceae","Aizoaceae","Amaranthaceae","Anacampserotaceae","Basellaceae",\
+#		"Cactaceae","Chenopodiaceae","Montiaceae",\
+#		"Phytolaccaceae","Portulacaceae","Petiveriaceae","Sarcobataceae"]
+# 4, which reversed back to anthocyanin
+#outgroups= ["Brassicaceae", "Salicaceae", "Fabaceae", "Vitaceae", "Solanaceae", "Aquilegia", "Poaceae", "Poaceae", "Rubiaceae", "Amborellaceae"]
+blue = []
+core_blue = ["Kewaceae","Limeaceae", "Molluginaceae", "Caryophyllaceae"]
+red = []
+unknow_color = []
+outgroups = []
+
+
+def get_front_labels(node):
+	"""given a node, return a list of front tip labels"""
+	leaves = node.leaves()
+	return [i.label for i in leaves]
+def get_back_labels(node,root):
+	"""given a node, return a list of back tip labels"""
+	all_labels = get_front_labels(root)
+	front_labels = get_front_labels(node)
+	return set(all_labels) - set(front_labels)
+def get_filename_from_path(path):
+	head, tail = ntpath.split(path)
+	return tail or ntpath.basename(head)
+
+if __name__ == "__main__":
+	if len(sys.argv) != 8:
+		print "python pattern_search.py table dir_ingroup_clades num_min_red_families num_dup_genes core_blue_spe/red_family_ratio outdir"
+		sys.exit(0)
+	
+	table,indir, file_end,num_dup_genes,num_min_red_families, ratio, outdir = sys.argv[1:]
+	num_dup_genes = float(num_dup_genes)
+	num_min_red_families = float(num_min_red_families)
+	ratio = float(ratio)
+	if indir[-1] != "/": indir += "/"
+	if outdir[-1] != "/": outdir += "/"
+	
+	familyDICT = {} #key is seq acronym, value is family
+	speciesDICT = {} #key is seq acronym, value is full taxon name
+	with open(table, "rU") as infile:
+		for line in infile:
+			spls = line.strip().split("\t")
+			if len(spls) < 2: continue
+			speciesDICT[spls[0]] = "_".join((spls[1].split("_"))[1:])  # Get the exact species name
+			familyDICT[spls[0]] = (spls[1].split("_"))[1]
+			if "blue" in (spls[1].split("_"))[0]:
+				if (spls[1].split("_"))[1] not in core_blue and (spls[1].split("_"))[1] not in blue:
+					blue.append((spls[1].split("_"))[1])
+			if "red" in (spls[1].split("_"))[0]:
+				if (spls[1].split("_"))[1] not in red:
+					red.append((spls[1].split("_"))[1])
+			if "unknown" in (spls[1].split("_"))[0]:
+				if (spls[1].split("_"))[1] not in unknow_color:
+					unknow_color.append((spls[1].split("_"))[1])
+			if "outgroup" in (spls[1].split("_"))[0]:
+				if (spls[1].split("_"))[1] not in outgroups:
+					outgroups.append((spls[1].split("_"))[1])
+		print set(familyDICT.values())
+		print red
+		print blue
+		print unknow_color
+		print outgroups
+	count_tree = 0 # keep track of number of trees read
+
+	for i in os.listdir(indir):
+		if i.endswith(file_end):
+			bait_gene_name = get_filename_from_path(i).split(".")[0]
+			if bait_gene_name.endswith("_1"): bait_gene_name.replace("_1", "")
+			count_tree += 1
+			num_pass_filter = 0
+			with open(indir+i,"r") as infile:
+				tree = newick3.parse(infile.readline())
+			print "search", i
+			node_num = 0
+
+			# get all the families that belong to the core Caryophyllales
+			# if front contain any non-Cary taxa, ignore the node
+			#print "search front node"
+
+			for node in tree.iternodes():
+				print "good"
+				node_num +=1
+				blue_families = []
+				blue_species = []
+				blue_tips = []
+				red_families = []
+				red_species = []
+				red_tips = []
+				blue_species = []
+				blue_tips = []
+				core_blue_families = []
+				core_blue_species = []
+				core_blue_tips = []
+				unknown_families = []
+				labels = get_front_labels(node)
+				for label in labels: # remove color labels
+				#print label
+					if familyDICT[label.split("@")[0]] in blue:
+						blue_families.append(speciesDICT[label.split("@")[0]])
+						blue_species.append(speciesDICT[label.split("@")[0]])
+						blue_tips.append(label)
+					if familyDICT[label.split("@")[0]] in red:
+						red_families.append(familyDICT[label.split("@")[0]])
+						red_species.append(speciesDICT[label.split("@")[0]])
+						red_tips.append(label)
+					if familyDICT[label.split("@")[0]] in core_blue:
+						core_blue_families.append(familyDICT[label.split("@")[0]])
+						core_blue_species.append(speciesDICT[label.split("@")[0]])
+						core_blue_tips.append(label)
+					if familyDICT[label.split("@")[0]] in unknow_color:
+						unknown_families.append(familyDICT[label.split("@")[0]])
+
+				num_blue_families = len(set(blue_families))
+				num_blue_species = len(set(blue_species))
+				num_blue_tips = len(blue_tips)
+				num_red_families = len(set(red_families))
+				num_red_species = len(set(red_species))
+				num_red_tips = len(red_tips)
+				num_core_blue_families = len(set(core_blue_families))
+				num_core_blue_species = len(set(core_blue_species))
+				num_core_blue_tips = len(core_blue_tips)
+
+				# in total, we have 30 blue species, 25 red species, 5 unknown species and 10 outgroup species
+				# blue families 9, species 13
+				# red families 16, species 25
+				# core blue families 4, species 17
+				if node_num == 1:
+					smalest_rate_value = None
+				# The first node satisfy the key filter
+				if len(set(red_families)) >= num_min_red_families and num_blue_families <= 1 and len(set(unknown_families)) <= 1:
+					# 1 node is not at the root
+					if node != tree:
+						for sister in node.get_sisters():
+							sister_labels = get_front_labels(sister)
+							sister_red_families = []
+							sister_core_blue_families = []
+							for label in sister_labels: 
+								if familyDICT[label.split("@")[0]] in red:
+									sister_red_families.append(familyDICT[label.split("@")[0]])
+								if familyDICT[label.split("@")[0]] in core_blue:
+									sister_core_blue_families.append(familyDICT[label.split("@")[0]])
+							# 1.1 sister is a gene duplication clade, keep the node information
+							if len(set(sister_red_families).intersection(set(red_families))) >=num_dup_genes: # only if sister node not include core_blue or sister node is a duplicated node
+								if smalest_rate_value == None:
+									smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+									blue_families_2 = blue_families
+									core_blue_species_2 = core_blue_species
+									red_families_2 = red_families
+								if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+									smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+									blue_families_2 = blue_families
+									core_blue_species_2 = core_blue_species
+									red_families_2 = red_families
+								if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+										blue_families_2 = blue_families
+										core_blue_species_2 = core_blue_species
+										red_families_2 = red_families
+							# 1.2 sister don't include core_blue, go further
+							if len(sister_core_blue_families) == 0:
+								# 1.2.1 node's parent's sister is not None (1st parent)
+								if (node.parent).get_sisters() != None:
+									sister_red_families_3 = []
+									sister_core_blue_families_3 = []
+									for sister in (node.parent).get_sisters():
+										sister_labels = get_front_labels(sister)
+										for label in sister_labels: 
+											if familyDICT[label.split("@")[0]] in red:
+												sister_red_families_3.append(familyDICT[label.split("@")[0]])
+											if familyDICT[label.split("@")[0]] in core_blue:
+												sister_core_blue_families_3.append(familyDICT[label.split("@")[0]])
+										# 1.2.1.1 a gene duplication, keep the node
+										if len(set(sister_red_families_3).intersection(set(red_families))) >=num_dup_genes: # only if sister node not include core_blue or sister node is a duplicated node
+											if smalest_rate_value == None:
+												smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+												blue_families_2 = blue_families
+												core_blue_species_2 = core_blue_species
+												red_families_2 = red_families
+											if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+												smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+												blue_families_2 = blue_families
+												core_blue_species_2 = core_blue_species
+												red_families_2 = red_families
+											if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+												blue_families_2 = blue_families
+												core_blue_species_2 = core_blue_species
+												red_families_2 = red_families
+										# 1.2.1.2.not include core blue, go further
+										if len(sister_core_blue_families_3) == 0:
+											# 1.2.1.2.1 
+											# parent.sister (2st pratent.sister)
+											if (node.parent).get_sisters() != None:
+												sister_red_families_3 = []
+												sister_core_blue_families_3 = []
+												for sister in (node.parent).get_sisters():
+													sister_labels = get_front_labels(sister)
+													for label in sister_labels: 
+														if familyDICT[label.split("@")[0]] in red:
+															sister_red_families_3.append(familyDICT[label.split("@")[0]])
+														if familyDICT[label.split("@")[0]] in core_blue:
+															sister_core_blue_families_3.append(familyDICT[label.split("@")[0]])
+													# gene duplication
+													if len(set(sister_red_families_3).intersection(set(red_families))) >=num_dup_genes: # only if sister node not include core_blue or sister node is a duplicated node
+														if smalest_rate_value == None:
+															smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+															blue_families_2 = blue_families
+															core_blue_species_2 = core_blue_species
+															red_families_2 = red_families
+														if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+															smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+															blue_families_2 = blue_families
+															core_blue_species_2 = core_blue_species
+															red_families_2 = red_families
+														if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+															blue_families_2 = blue_families
+															core_blue_species_2 = core_blue_species
+															red_families_2 = red_families
+													# go further
+													if len(sister_core_blue_families_3) == 0:
+														# parent.sister (3st pratent.sister)
+														if (node.parent).get_sisters() != None:
+															sister_red_families_3 = []
+															sister_core_blue_families_3 = []
+															for sister in (node.parent).get_sisters():
+																sister_labels = get_front_labels(sister)
+																for label in sister_labels: 
+																	if familyDICT[label.split("@")[0]] in red:
+																		sister_red_families_3.append(familyDICT[label.split("@")[0]])
+																	if familyDICT[label.split("@")[0]] in core_blue:
+																		sister_core_blue_families_3.append(familyDICT[label.split("@")[0]])
+																if len(set(sister_red_families_3).intersection(set(red_families))) >=num_dup_genes: # only if sister node not include core_blue or sister node is a duplicated node
+																	if smalest_rate_value == None:
+																		smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																		blue_families_2 = blue_families
+																		core_blue_species_2 = core_blue_species
+																		red_families_2 = red_families
+																	if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+																		smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																		blue_families_2 = blue_families
+																		core_blue_species_2 = core_blue_species
+																		red_families_2 = red_families
+																	if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+																		blue_families_2 = blue_families
+																		core_blue_species_2 = core_blue_species
+																		red_families_2 = red_families
+																	if len(sister_core_blue_families_3) == 0:
+																		# parent.sister (4st pratent.sister)
+																		if (node.parent).get_sisters() != None:
+																			sister_red_families_3 = []
+																			sister_core_blue_families_3 = []
+																			for sister in (node.parent).get_sisters():
+																				sister_labels = get_front_labels(sister)
+																				for label in sister_labels: 
+																					if familyDICT[label.split("@")[0]] in red:
+																						sister_red_families_3.append(familyDICT[label.split("@")[0]])
+																					if familyDICT[label.split("@")[0]] in core_blue:
+																						sister_core_blue_families_3.append(familyDICT[label.split("@")[0]])
+																				if len(sister_core_blue_families_3) ==0 or len(set(sister_red_families_3).intersection(set(red_families))) >=num_dup_genes: # only if sister node not include core_blue or sister node is a duplicated node
+																					if smalest_rate_value == None:
+																						smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																						blue_families_2 = blue_families
+																						core_blue_species_2 = core_blue_species
+																						red_families_2 = red_families
+																					if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+																						smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																						blue_families_2 = blue_families
+																						core_blue_species_2 = core_blue_species
+																						red_families_2 = red_families
+																					if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+																						blue_families_2 = blue_families
+																						core_blue_species_2 = core_blue_species
+																						red_families_2 = red_families
+																		else:
+																			if smalest_rate_value == None:
+																				smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																				blue_families_2 = blue_families
+																				core_blue_species_2 = core_blue_species
+																				red_families_2 = red_families
+																			if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+																				smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																				blue_families_2 = blue_families
+																				core_blue_species_2 = core_blue_species
+																				red_families_2 = red_families
+																			if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+																				blue_families_2 = blue_families
+																				core_blue_species_2 = core_blue_species
+																				red_families_2 = red_families
+														else:
+															if smalest_rate_value == None:
+																smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																blue_families_2 = blue_families
+																core_blue_species_2 = core_blue_species
+																red_families_2 = red_families
+															if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+																smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+																blue_families_2 = blue_families
+																core_blue_species_2 = core_blue_species
+																red_families_2 = red_families
+															if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+																blue_families_2 = blue_families
+																core_blue_species_2 = core_blue_species
+																red_families_2 = red_families
+											# 1.2.1.2.2
+											else:
+												if smalest_rate_value == None:
+													smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+													blue_families_2 = blue_families
+													core_blue_species_2 = core_blue_species
+													red_families_2 = red_families
+												if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+													smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+													blue_families_2 = blue_families
+													core_blue_species_2 = core_blue_species
+													red_families_2 = red_families
+												if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+													blue_families_2 = blue_families
+													core_blue_species_2 = core_blue_species
+													red_families_2 = red_families
+								# 1.2.2 node's parent's sister is None
+								else:
+									if smalest_rate_value == None:
+										smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+										blue_families_2 = blue_families
+										core_blue_species_2 = core_blue_species
+										red_families_2 = red_families
+									if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+										smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+										blue_families_2 = blue_families
+										core_blue_species_2 = core_blue_species
+										red_families_2 = red_families
+									if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+										blue_families_2 = blue_families
+										core_blue_species_2 = core_blue_species
+									red_families_2 = red_families
+					# 2 node is at the root
+					else:
+						if smalest_rate_value == None:
+							smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+							blue_families_2 = blue_families
+							core_blue_species_2 = core_blue_species
+							red_families_2 = red_families
+						if num_core_blue_species/(num_red_families + 0.00001) < smalest_rate_value:
+							smalest_rate_value = num_core_blue_species/(num_red_families + 0.00001)
+							blue_families_2 = blue_families
+							core_blue_species_2 = core_blue_species
+							red_families_2 = red_families
+						if num_core_blue_species/(num_red_families + 0.00001) == smalest_rate_value and num_red_families > len(set(red_families_2)):
+							blue_families_2 = blue_families
+							core_blue_species_2 = core_blue_species
+							red_families_2 = red_families
+									
+
+			if smalest_rate_value != None and smalest_rate_value <ratio:
+				print i, "pass the filter"
+				with open(outdir+"id.local.filter.proportion.pass","a") as outfile:
+					outfile.write(i + " " + str(smalest_rate_value) + " "+  str(len(set(red_families_2))) \
+					+ "\n" + str(set(blue_families_2)) + "\n" + str(set(core_blue_species_2)) + "\n"  + str(set(red_families_2)) + ";\n" + "\n" )
+				with open(outdir+i+".front.proportion.pass","w") as outfile:
+					outfile.write(newick3.tostring(tree)+";\n")
+
+	for i in os.listdir(outdir):
+		if "name" not in i and "id.front.proportion" not in i:
+			taxon_name_subst.taxon_name_subst(original=outdir+i)
